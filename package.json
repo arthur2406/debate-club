@@ -1,11 +1,25 @@
 {
   "name": "debate-club",
+  "version": "1.0.0",
   "private": true,
+  "type": "commonjs",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
     "build": "npm run build -w @debate-club/shared && npm run build -w @debate-club/backend",
-    "start": "npm run start -w @debate-club/backend"
+    "start": "npm run start -w @debate-club/backend",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "format": "npm run format --workspaces --if-present",
+    "format:write": "npm run format:write --workspaces --if-present",
+    "ci": "npm run lint && npm run test && npm run format"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "jest": "^30.2.0",
+    "prettier": "^3.6.2"
   }
 }
