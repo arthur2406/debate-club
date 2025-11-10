@@ -1,0 +1,72 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: debate_club
+      POSTGRES_USER: debate_club
+      POSTGRES_PASSWORD: change_me
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - debate
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    depends_on:
+      - postgres
+      - turn
+    environment:
+      DATABASE_URL: postgresql://debate_club:change_me@postgres:5432/debate_club
+      PORT: 4000
+      TURN_URL: turn:turn:3478
+      TURN_USERNAME: debate
+      TURN_PASSWORD: debatepass
+    ports:
+      - "4000:4000"
+    networks:
+      - debate
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://backend:4000
+    ports:
+      - "3000:3000"
+    networks:
+      - debate
+
+  turn:
+    image: coturn/coturn:4.5.2
+    restart: unless-stopped
+    command:
+      - "--log-file=stdout"
+      - "--verbose"
+      - "--fingerprint"
+      - "--lt-cred-mech"
+      - "--no-cli"
+      - "--realm=debate.local"
+      - "--user=debate:debatepass"
+      - "--listening-port=3478"
+      - "--min-port=49152"
+      - "--max-port=49200"
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    networks:
+      - debate
+
+volumes:
+  postgres-data:
+
+networks:
+  debate:
+    driver: bridge

@@ -1,0 +1,15 @@
+# Frontend service image for Debate Club
+FROM node:20-alpine AS base
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN if [ -f package.json ]; then npm install; fi
+
+COPY . .
+
+RUN if [ -f package.json ]; then npm run build --if-present; fi
+
+EXPOSE 3000
+
+CMD ["npm", "run", "start:frontend"]
