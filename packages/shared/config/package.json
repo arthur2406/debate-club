@@ -1,0 +1,17 @@
+{
+  "name": "@debate-club/shared-config",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "exports": {
+    "./eslint": "./eslint.cjs",
+    "./prettier": "./prettier.config.cjs",
+    "./jest": "./jest.config.cjs"
+  },
+  "files": [
+    "index.js",
+    "eslint.cjs",
+    "prettier.config.cjs",
+    "jest.config.cjs"
+  ]
+}

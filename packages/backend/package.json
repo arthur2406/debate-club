@@ -1,0 +1,15 @@
+{
+  "name": "@debate-club/backend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "lint": "eslint \"src/**/*.js\"",
+    "test": "jest",
+    "format": "prettier --check \"src/**/*.{js,json}\"",
+    "format:write": "prettier --write \"src/**/*.{js,json}\""
+  },
+  "devDependencies": {
+    "@debate-club/shared-config": "file:../shared/config"
+  }
+}

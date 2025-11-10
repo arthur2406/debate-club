@@ -3,11 +3,15 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "src/index.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "jest",
+    "format": "prettier --check \"src/**/*.{js,jsx,json}\"",
+    "format:write": "prettier --write \"src/**/*.{js,jsx,json}\
   },
   "dependencies": {
     "@chakra-ui/icons": "^2.1.1",
@@ -29,6 +33,7 @@
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
     "typescript": "^5.2.2",
-    "vite": "^5.1.0"
+    "vite": "^5.1.0",
+    "@debate-club/shared-config": "file:../shared/config"
   }
 }
