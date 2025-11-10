@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "jest",
     "format": "prettier --check \"src/**/*.{js,jsx,json}\"",
-    "format:write": "prettier --write \"src/**/*.{js,jsx,json}\
+    "format:write": "prettier --write \"src/**/*.{js,jsx,json}\""
   },
   "dependencies": {
     "@chakra-ui/icons": "^2.1.1",
