@@ -1,0 +1,75 @@
+// Prisma schema defining core debate club models
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Datasource configured for PostgreSQL. The actual connection string is
+// provided at runtime via the DATABASE_URL environment variable.
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String    @id @default(uuid())
+  email       String    @unique
+  displayName String
+  role        UserRole  @default(MEMBER)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  debatesAff  Debate[]  @relation("AffirmativeUser")
+  debatesNeg  Debate[]  @relation("NegativeUser")
+  feedback    Feedback[]
+}
+
+enum UserRole {
+  MEMBER
+  MODERATOR
+  ADMIN
+}
+
+model Topic {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  debates     Debate[]
+}
+
+model Debate {
+  id                 String    @id @default(uuid())
+  topicId            String
+  affirmativeUserId  String
+  negativeUserId     String
+  scheduledAt        DateTime
+  status             DebateStatus @default(SCHEDULED)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  topic              Topic     @relation(fields: [topicId], references: [id])
+  affirmativeSpeaker User      @relation("AffirmativeUser", fields: [affirmativeUserId], references: [id])
+  negativeSpeaker    User      @relation("NegativeUser", fields: [negativeUserId], references: [id])
+  feedback           Feedback[]
+}
+
+enum DebateStatus {
+  SCHEDULED
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+model Feedback {
+  id        String   @id @default(uuid())
+  debateId  String
+  userId    String
+  rating    Int      @default(0)
+  comment   String?
+  createdAt DateTime @default(now())
+  debate    Debate   @relation(fields: [debateId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([debateId])
+  @@index([userId])
+}
