@@ -7,6 +7,8 @@
     "packages/*"
   ],
   "scripts": {
+    "build": "npm run build -w @debate-club/shared && npm run build -w @debate-club/backend",
+    "start": "npm run start -w @debate-club/backend",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "format": "npm run format --workspaces --if-present",
