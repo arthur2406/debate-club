@@ -18,6 +18,7 @@
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.0",
     "@types/node": "^20.11.30",
-    "@types/uuid": "^9.0.7"
+    "@types/uuid": "^9.0.7",
+    "@types/ws": "^8.5.12"
   }
 }

@@ -59,6 +59,7 @@ export class WhipGateway extends EventEmitter {
       lastSeenAt: now,
       phase: session.currentPhase,
       round: session.currentRound,
+      metadata: request.clientCapabilities,
     };
 
     const participants = this.getOrCreateParticipants(session.id);
@@ -93,6 +94,12 @@ export class WhipGateway extends EventEmitter {
     if (participants.size === 0) {
       this.cancelSessionTimers(sessionId);
     }
+  }
+
+  listParticipants(sessionId: string): WhipSession[] {
+    const participants = this.sessionParticipants.get(sessionId);
+    if (!participants) return [];
+    return Array.from(participants.values());
   }
 
   async handleIceCandidate(

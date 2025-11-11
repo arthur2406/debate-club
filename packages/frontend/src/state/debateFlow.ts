@@ -1,6 +1,15 @@
-import { createContext, createElement, ReactNode, useCallback, useContext, useMemo, useReducer } from 'react'
+import {
+  createContext,
+  createElement,
+  ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useReducer,
+} from 'react'
+import type { DebateRoundTiming, DebateSessionState } from '@debate-club/shared'
 
-export type DebatePhase = 'idle' | 'topicSelection' | 'ready' | 'inRound' | 'betweenRounds' | 'completed'
+export type UiDebatePhase = 'idle' | 'topicSelection' | 'ready' | 'inRound' | 'betweenRounds' | 'completed'
 
 export interface DebateRound {
   id: string
@@ -9,12 +18,14 @@ export interface DebateRound {
 }
 
 export interface DebateState {
-  phase: DebatePhase
+  phase: UiDebatePhase
   selectedTopic?: string
   rounds: DebateRound[]
   activeRoundIndex: number | null
   timeRemaining: number | null
   participants: string[]
+  backendSession: DebateSessionState | null
+  roundTiming: DebateRoundTiming | null
 }
 
 const defaultRounds: DebateRound[] = [
@@ -30,6 +41,8 @@ const initialState: DebateState = {
   activeRoundIndex: null,
   timeRemaining: null,
   participants: [],
+  backendSession: null,
+  roundTiming: null,
 }
 
 type DebateAction =
@@ -40,6 +53,15 @@ type DebateAction =
   | { type: 'startDebate' }
   | { type: 'advanceRound' }
   | { type: 'tick'; delta?: number }
+  | { type: 'setBackendSession'; session: DebateSessionState | null }
+  | {
+      type: 'syncPhase'
+      phase: UiDebatePhase
+      activeRoundIndex: number | null
+      timeRemaining: number | null
+      roundTiming: DebateRoundTiming | null
+      session?: DebateSessionState | null
+    }
   | { type: 'reset' }
 
 const reducer = (state: DebateState, action: DebateAction): DebateState => {
@@ -97,26 +119,38 @@ const reducer = (state: DebateState, action: DebateAction): DebateState => {
       }
     }
     case 'tick': {
-      if (state.phase !== 'inRound' || state.timeRemaining === null) {
+      if (state.timeRemaining === null) {
         return state
       }
       const delta = action.delta ?? 1
       const nextTime = Math.max(0, state.timeRemaining - delta)
-      if (nextTime === 0) {
-        const isLastRound =
-          state.activeRoundIndex === null || state.activeRoundIndex >= state.rounds.length - 1
-        return {
-          ...state,
-          phase: isLastRound ? 'completed' : 'betweenRounds',
-          timeRemaining: 0,
-          activeRoundIndex: isLastRound ? null : state.activeRoundIndex,
-        }
-      }
       return {
         ...state,
         timeRemaining: nextTime,
       }
     }
+    case 'setBackendSession':
+      return {
+        ...state,
+        backendSession: action.session ?? null,
+        phase: action.session
+          ? ['idle', 'topicSelection'].includes(state.phase)
+            ? 'ready'
+            : state.phase
+          : 'idle',
+        activeRoundIndex: action.session ? state.activeRoundIndex : null,
+        timeRemaining: action.session ? state.timeRemaining : null,
+        roundTiming: action.session ? state.roundTiming : null,
+      }
+    case 'syncPhase':
+      return {
+        ...state,
+        phase: action.phase,
+        activeRoundIndex: action.activeRoundIndex,
+        timeRemaining: action.timeRemaining,
+        roundTiming: action.roundTiming,
+        backendSession: action.session ?? state.backendSession,
+      }
     case 'reset':
       return {
         ...initialState,
@@ -137,6 +171,14 @@ interface DebateFlowContextValue {
   advanceRound: () => void
   tick: (delta?: number) => void
   resetDebate: () => void
+  setBackendSession: (session: DebateSessionState | null) => void
+  syncPhase: (
+    phase: UiDebatePhase,
+    activeRoundIndex: number | null,
+    timeRemaining: number | null,
+    roundTiming: DebateRoundTiming | null,
+    session?: DebateSessionState | null,
+  ) => void
 }
 
 const DebateFlowContext = createContext<DebateFlowContextValue | undefined>(undefined)
@@ -158,6 +200,28 @@ export const DebateProvider = ({ children }: { children: ReactNode }) => {
   const advanceRound = useCallback(() => dispatch({ type: 'advanceRound' }), [])
   const tick = useCallback((delta?: number) => dispatch({ type: 'tick', delta }), [])
   const resetDebate = useCallback(() => dispatch({ type: 'reset' }), [])
+  const setBackendSession = useCallback(
+    (session: DebateSessionState | null) => dispatch({ type: 'setBackendSession', session }),
+    [],
+  )
+  const syncPhase = useCallback(
+    (
+      phase: UiDebatePhase,
+      activeRoundIndex: number | null,
+      timeRemaining: number | null,
+      roundTiming: DebateRoundTiming | null,
+      session?: DebateSessionState | null,
+    ) =>
+      dispatch({
+        type: 'syncPhase',
+        phase,
+        activeRoundIndex,
+        timeRemaining,
+        roundTiming,
+        session,
+      }),
+    [],
+  )
 
   const value = useMemo(
     () => ({
@@ -170,6 +234,8 @@ export const DebateProvider = ({ children }: { children: ReactNode }) => {
       advanceRound,
       tick,
       resetDebate,
+      setBackendSession,
+      syncPhase,
     }),
     [
       state,
@@ -181,6 +247,8 @@ export const DebateProvider = ({ children }: { children: ReactNode }) => {
       advanceRound,
       tick,
       resetDebate,
+      setBackendSession,
+      syncPhase,
     ],
   )
 
