@@ -11,12 +11,15 @@ import {
   Stack,
   Text,
   VStack,
+  useToast,
 } from '@chakra-ui/react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import TopicCard from '../components/TopicCard'
 import { useDebateFlow } from '../state/debateFlow'
 import { useSession } from '../state/session'
+import type { DebateTopic } from '@debate-club/shared'
+import { createSession, fetchTopics } from '../api/client'
 
 const curatedTopics = [
   {
@@ -51,6 +54,16 @@ const durationOptions = [
   { label: '3 minute rounds', value: 180 },
 ]
 
+const createFallbackTopics = (): DebateTopic[] =>
+  curatedTopics.map((topic, index) => ({
+    id: `fallback-${index}`,
+    title: topic.title,
+    description: topic.description,
+    tags: [],
+    createdAt: new Date(2024, 0, index + 1).toISOString(),
+    updatedAt: new Date(2024, 0, index + 1).toISOString(),
+  }))
+
 const TopicSelectionPage = () => {
   const navigate = useNavigate()
   const { session } = useSession()
@@ -60,12 +73,15 @@ const TopicSelectionPage = () => {
     selectTopic,
     setParticipants,
     setRoundDuration,
-    startDebate,
+    setBackendSession,
   } = useDebateFlow()
   const [opponent, setOpponent] = useState('')
   const [customTopic, setCustomTopic] = useState('')
-  const [localSelection, setLocalSelection] = useState(selectedTopic ?? '')
+  const [topicOptions, setTopicOptions] = useState<DebateTopic[]>([])
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null)
   const [selectedDuration, setSelectedDuration] = useState(rounds[0]?.duration ?? 120)
+  const [isCreatingSession, setIsCreatingSession] = useState(false)
+  const toast = useToast()
 
   useEffect(() => {
     beginTopicSelection()
@@ -78,10 +94,46 @@ const TopicSelectionPage = () => {
   }, [session, navigate])
 
   useEffect(() => {
-    if (selectedTopic) {
-      setLocalSelection(selectedTopic)
+    let isMounted = true
+    ;(async () => {
+      try {
+        const topics = await fetchTopics()
+        if (!isMounted) {
+          return
+        }
+        if (topics.length === 0) {
+          setTopicOptions(createFallbackTopics())
+        } else {
+          setTopicOptions(topics)
+        }
+      } catch (error) {
+        console.error('Failed to load topics', error)
+        if (!isMounted) {
+          return
+        }
+        toast({
+          title: 'Unable to load topics',
+          description: 'Using curated defaults temporarily.',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        })
+        setTopicOptions(createFallbackTopics())
+      }
+    })()
+    return () => {
+      isMounted = false
     }
-  }, [selectedTopic])
+  }, [toast])
+
+  useEffect(() => {
+    if (selectedTopic && topicOptions.length) {
+      const found = topicOptions.find((topic) => topic.title === selectedTopic)
+      if (found) {
+        setSelectedTopicId(found.id)
+      }
+    }
+  }, [selectedTopic, topicOptions])
 
   useEffect(() => {
     if (rounds[0]) {
@@ -89,11 +141,11 @@ const TopicSelectionPage = () => {
     }
   }, [rounds])
 
-  const canStart = useMemo(() => Boolean(localSelection && session), [localSelection, session])
+  const canStart = useMemo(() => Boolean(selectedTopicId && session), [selectedTopicId, session])
 
-  const handleTopicSelect = (topic: string) => {
-    setLocalSelection(topic)
-    selectTopic(topic)
+  const handleTopicSelect = (topic: DebateTopic) => {
+    setSelectedTopicId(topic.id)
+    selectTopic(topic.title)
   }
 
   const handleCustomTopic = () => {
@@ -101,7 +153,16 @@ const TopicSelectionPage = () => {
     if (!trimmed) {
       return
     }
-    handleTopicSelect(trimmed)
+    const newTopic: DebateTopic = {
+      id: `custom-${Date.now()}`,
+      title: trimmed,
+      description: 'Custom topic',
+      tags: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    setTopicOptions((prev) => [newTopic, ...prev])
+    handleTopicSelect(newTopic)
     setCustomTopic('')
   }
 
@@ -110,18 +171,40 @@ const TopicSelectionPage = () => {
     setRoundDuration(value)
   }
 
-  const handleStartDebate = () => {
-    if (!session || !localSelection) {
+  const handleStartDebate = async () => {
+    if (!session || !selectedTopicId) {
       return
     }
-    const participants = [session.name]
-    if (opponent.trim()) {
-      participants.push(opponent.trim())
+
+    const topic = topicOptions.find((item) => item.id === selectedTopicId)
+    if (!topic) {
+      toast({
+        title: 'Select a topic',
+        status: 'warning',
+        duration: 2500,
+        isClosable: true,
+      })
+      return
     }
-    setParticipants(participants)
-    // round duration already synced via handleDurationChange
-    startDebate()
-    navigate('/debate')
+
+    setIsCreatingSession(true)
+    try {
+      const backendSession = await createSession(topic.id, [session.id])
+      setBackendSession(backendSession)
+      setParticipants([session.name, ...(opponent.trim() ? [opponent.trim()] : [])])
+      navigate('/debate')
+    } catch (error) {
+      console.error('Failed to create session', error)
+      toast({
+        title: 'Could not create session',
+        description: error instanceof Error ? error.message : undefined,
+        status: 'error',
+        duration: 3500,
+        isClosable: true,
+      })
+    } finally {
+      setIsCreatingSession(false)
+    }
   }
 
   return (
@@ -139,13 +222,13 @@ const TopicSelectionPage = () => {
       </VStack>
 
       <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-        {curatedTopics.map((topic) => (
+        {topicOptions.map((topic) => (
           <TopicCard
-            key={topic.title}
+            key={topic.id}
             topic={topic.title}
             description={topic.description}
-            isSelected={localSelection === topic.title}
-            onSelect={() => handleTopicSelect(topic.title)}
+            isSelected={selectedTopicId === topic.id}
+            onSelect={() => handleTopicSelect(topic)}
           />
         ))}
       </SimpleGrid>
@@ -188,11 +271,22 @@ const TopicSelectionPage = () => {
         <Stack direction={{ base: 'column', md: 'row' }} align="center" justify="space-between">
           <Box>
             <Text fontWeight="semibold">Selected topic</Text>
-            <Text color="gray.500">{localSelection || 'No topic selected yet'}</Text>
+            <Text color="gray.500">
+              {selectedTopicId
+                ? topicOptions.find((topic) => topic.id === selectedTopicId)?.title ?? 'Custom topic'
+                : 'No topic selected yet'}
+            </Text>
           </Box>
           <HStack spacing={3}>
             <Badge colorScheme={phase === 'ready' ? 'green' : 'gray'}>{phase}</Badge>
-            <Button colorScheme="teal" size="lg" onClick={handleStartDebate} isDisabled={!canStart}>
+            <Button
+              colorScheme="teal"
+              size="lg"
+              onClick={handleStartDebate}
+              isDisabled={!canStart || isCreatingSession}
+              isLoading={isCreatingSession}
+              loadingText="Starting"
+            >
               Launch debate room
             </Button>
           </HStack>

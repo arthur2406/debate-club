@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
+import type WebSocket from "ws";
 import { topicRoutes } from "./routes/topicRoutes";
 import { matchmakingRoutes } from "./routes/matchmakingRoutes";
 import { sessionRoutes } from "./routes/sessionRoutes";
@@ -13,7 +14,46 @@ import { MatchmakingService } from "./services/matchmakingService";
 import { SessionService } from "./services/sessionService";
 import { FeedbackService } from "./services/feedbackService";
 import { WhipGateway } from "./signaling/whipGateway";
-import { WhipIceCandidate } from "@debate-club/shared";
+import { DebateTopic, WhipIceCandidate } from "@debate-club/shared";
+
+const DEFAULT_TOPICS: Array<Pick<DebateTopic, "title" | "description" | "tags">> = [
+  {
+    title: "Technology & Society",
+    description: "Should AI assistants be regulated as public utilities?",
+    tags: ["technology", "policy"],
+  },
+  {
+    title: "Climate Policy",
+    description: "Is a carbon tax the most effective tool to reduce emissions?",
+    tags: ["environment"],
+  },
+  {
+    title: "Education Reform",
+    description: "Should universities eliminate standardized testing requirements?",
+    tags: ["education"],
+  },
+  {
+    title: "Media Literacy",
+    description: "Are social media platforms responsible for fact-checking content?",
+    tags: ["media"],
+  },
+];
+
+async function seedTopics(topicService: TopicService) {
+  const existing = await topicService.listTopics();
+  if (existing.length > 0) {
+    return;
+  }
+  await Promise.all(
+    DEFAULT_TOPICS.map((topic) =>
+      topicService.createTopic({
+        title: topic.title,
+        description: topic.description,
+        tags: topic.tags,
+      })
+    )
+  );
+}
 
 async function buildServer() {
   const fastify = Fastify({ logger: true });
@@ -28,12 +68,25 @@ async function buildServer() {
   const matchmakingService = new MatchmakingService(matchmakingRepository);
   const sessionService = new SessionService(sessionRepository);
   const feedbackService = new FeedbackService(feedbackRepository);
-  const whipGateway = new WhipGateway({ sessionService });
+  const participantsPerSession = Number(process.env.PARTICIPANTS_PER_SESSION ?? 2);
+  const whipGateway = new WhipGateway({ sessionService, participantsPerSession });
+  await seedTopics(topicService);
+
+  const signalingSockets = new Map<string, Map<string, WebSocket>>();
 
   await fastify.register(topicRoutes, { topicService });
   await fastify.register(matchmakingRoutes, { matchmakingService });
   await fastify.register(sessionRoutes, { sessionService, topicService });
   await fastify.register(feedbackRoutes, { feedbackService });
+
+  fastify.get("/sessions/:sessionId/participants", async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    const participants = whipGateway.listParticipants(sessionId);
+    if (!participants.length) {
+      reply.code(200);
+    }
+    return participants;
+  });
 
   fastify.post("/whip/publish", async (request, reply) => {
     const body = request.body as {
@@ -77,6 +130,30 @@ async function buildServer() {
     { websocket: true },
     (connection, request) => {
       const { sessionId } = request.params as { sessionId: string };
+      const { participantId } = request.query as { participantId?: string };
+
+      if (!participantId) {
+        connection.socket.close(1008, "participantId required");
+        return;
+      }
+
+      const sessionSockets = signalingSockets.get(sessionId) ?? new Map<string, WebSocket>();
+      signalingSockets.set(sessionId, sessionSockets);
+      sessionSockets.set(participantId, connection.socket);
+
+      const sendJSON = (socket: WebSocket, payload: unknown) => {
+        if (socket.readyState === socket.OPEN) {
+          socket.send(JSON.stringify(payload));
+        }
+      };
+
+      const forwardToParticipant = (targetId: string, payload: unknown) => {
+        const targetSocket = sessionSockets.get(targetId);
+        if (!targetSocket) {
+          return;
+        }
+        sendJSON(targetSocket, payload);
+      };
 
       const handlePhaseChanged = (payload: {
         sessionId: string;
@@ -84,23 +161,18 @@ async function buildServer() {
         round: number;
       }) => {
         if (payload.sessionId === sessionId) {
-          connection.socket.send(
-            JSON.stringify({ type: "phase", phase: payload.phase, round: payload.round })
-          );
+          sendJSON(connection.socket, {
+            type: "phase",
+            phase: payload.phase,
+            round: payload.round,
+          });
         }
       };
 
       const handleParticipantEvent = (type: string) => (payload: any) => {
         if (payload.sessionId === sessionId) {
-          connection.socket.send(JSON.stringify({ type, payload }));
+          sendJSON(connection.socket, { type, payload });
         }
-      };
-
-      const handleClose = () => {
-        whipGateway.off("phase-changed", handlePhaseChanged);
-        whipGateway.off("participant-joined", joinedListener);
-        whipGateway.off("participant-left", leftListener);
-        whipGateway.off("ice-candidate", iceListener);
       };
 
       const joinedListener = handleParticipantEvent("participant-joined");
@@ -111,7 +183,7 @@ async function buildServer() {
         candidate: WhipIceCandidate;
       }) => {
         if (payload.sessionId === sessionId) {
-          connection.socket.send(JSON.stringify({ type: "ice", payload }));
+          sendJSON(connection.socket, { type: "ice", payload });
         }
       };
 
@@ -120,20 +192,59 @@ async function buildServer() {
       whipGateway.on("participant-left", leftListener);
       whipGateway.on("ice-candidate", iceListener);
 
-      connection.socket.on("message", async (message: string) => {
+      connection.socket.on("message", async (rawMessage: Buffer) => {
         try {
-          const parsed = JSON.parse(message.toString());
+          const parsed = JSON.parse(rawMessage.toString());
           if (parsed.type === "heartbeat") {
-            await whipGateway.handleSessionHeartbeat(sessionId, parsed.participantId);
-          } else if (parsed.type === "ice") {
-            await whipGateway.handleIceCandidate(sessionId, parsed.participantId, parsed.candidate);
+            await whipGateway.handleSessionHeartbeat(sessionId, participantId);
+            return;
+          }
+
+          if (parsed.type === "offer" || parsed.type === "answer") {
+            if (typeof parsed.to === "string") {
+              forwardToParticipant(parsed.to, {
+                type: parsed.type,
+                from: participantId,
+                description: parsed.description,
+              });
+            }
+            return;
+          }
+
+          if (parsed.type === "ice") {
+            if (parsed.to) {
+              forwardToParticipant(parsed.to, {
+                type: "ice",
+                from: participantId,
+                candidate: parsed.candidate,
+              });
+            }
+            if (parsed.candidate) {
+              await whipGateway.handleIceCandidate(sessionId, participantId, parsed.candidate);
+            }
+            return;
           }
         } catch (error) {
           request.log.warn({ err: error }, "Invalid signaling payload");
         }
       });
 
+      const handleClose = async () => {
+        whipGateway.off("phase-changed", handlePhaseChanged);
+        whipGateway.off("participant-joined", joinedListener);
+        whipGateway.off("participant-left", leftListener);
+        whipGateway.off("ice-candidate", iceListener);
+
+        sessionSockets.delete(participantId);
+        if (sessionSockets.size === 0) {
+          signalingSockets.delete(sessionId);
+        }
+
+        await whipGateway.handleDelete(sessionId, participantId);
+      };
+
       connection.socket.on("close", handleClose);
+      connection.socket.on("error", handleClose);
     }
   );
 
