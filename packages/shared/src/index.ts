@@ -87,6 +87,7 @@ export interface WhipSession {
   lastSeenAt: string;
   phase: DebatePhase;
   round: number;
+  metadata?: Record<string, unknown>;
 }
 
 export interface TopicRepository {
