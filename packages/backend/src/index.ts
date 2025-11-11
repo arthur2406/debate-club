@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
+import cors from "@fastify/cors";
 import type WebSocket from "ws";
 import { topicRoutes } from "./routes/topicRoutes";
 import { matchmakingRoutes } from "./routes/matchmakingRoutes";
@@ -58,6 +59,11 @@ async function seedTopics(topicService: TopicService) {
 async function buildServer() {
   const fastify = Fastify({ logger: true });
   await fastify.register(websocket);
+  await fastify.register(cors, {
+    origin: process.env.CORS_ORIGIN ?? true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  });
 
   const topicRepository = new InMemoryTopicRepository();
   const matchmakingRepository = new InMemoryMatchmakingRepository();
